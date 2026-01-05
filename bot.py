@@ -1,30 +1,93 @@
-
-import sqlite3
-from PIL import Image
-from telebot import TeleBot
-from io import BytesIO
-import threading
-import time
 import logging
-import requests
-from telebot import TeleBot, types
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 import os
+import sqlite3
+import time
+from datetime import datetime
+from io import BytesIO
+
 import qrcode
+import requests
 from bakong_khqr import KHQR
+from telebot import TeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
+
+
+def _get_env(name, *, default=None, required=False):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        if required:
+            raise RuntimeError(f"Missing required environment variable: {name}")
+        return default
+    return value.strip()
+
+
+def _get_env_int(name, *, default=None, required=False):
+    raw_value = _get_env(name, default=None, required=required)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"Environment variable {name} must be an integer") from exc
+
+
+def _get_env_int_list(name, *, default=None):
+    raw_value = _get_env(name)
+    if raw_value is None:
+        return default or []
+    result = []
+    for chunk in raw_value.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            result.append(int(chunk))
+        except ValueError as exc:
+            raise ValueError(
+                f"Environment variable {name} must contain integers separated by commas"
+            ) from exc
+    return result
+
+
+# Configuration loaded from environment variables
+BOT_TOKEN = _get_env("BOT_TOKEN", required=True)
+API_TOKEN_BAKONG = _get_env("BAKONG_API_TOKEN", required=True)
+
+ADMIN_IDS = _get_env_int_list("ADMIN_IDS")
+if not ADMIN_IDS:
+    raise RuntimeError("ADMIN_IDS must contain at least one Telegram user ID")
+
+DEPOSIT_GROUP_ID = _get_env_int("DEPOSIT_GROUP_ID", required=True)
+GROUP_OPERATIONS_ID = _get_env_int("GROUP_OPERATIONS_ID")
+GROUP_FF_ID = _get_env_int("GROUP_FF_ID")
+GROUP_MLBB_ID = _get_env_int("GROUP_MLBB_ID")
+
+KHQR_BANK_ACCOUNT = _get_env("KHQR_BANK_ACCOUNT", required=True)
+KHQR_MERCHANT_NAME = _get_env("KHQR_MERCHANT_NAME", required=True)
+KHQR_MERCHANT_CITY = _get_env("KHQR_MERCHANT_CITY", required=True)
+KHQR_CURRENCY = _get_env("KHQR_CURRENCY", default="USD")
+KHQR_STORE_LABEL = _get_env("KHQR_STORE_LABEL", default="MShop")
+KHQR_PHONE_NUMBER = _get_env("KHQR_PHONE_NUMBER")
+KHQR_BILL_NUMBER = _get_env("KHQR_BILL_NUMBER", default="TRX019283775")
+KHQR_TERMINAL_LABEL = _get_env("KHQR_TERMINAL_LABEL", default="Cashier-01")
+KHQR_STATIC = _get_env("KHQR_STATIC", default="false").lower() == "true"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
 # Telegram Bot Token
-bot_token = "7807833216:AAHgNaQZEDWPG8iBcD9SnDZ7We8HLEZ_V7g"  # Replace with your actual bot token
-bot = TeleBot(bot_token)
+bot = TeleBot(BOT_TOKEN)
 
 # API Token Bakong
-api_token_bakong = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRhIjp7ImlkIjoiNmFmM2FlMWU3Yzg4NDQ3OCJ9LCJpYXQiOjE3NDM1MTE4MjUsImV4cCI6MTc1MTI4NzgyNX0.ShQ-iQ96VKcqktZZnigUgqaDuooeuPGpnduzdtNxBGA"
-khqr = KHQR(api_token_bakong)
+khqr = KHQR(API_TOKEN_BAKONG)
 
 user_last_interaction = {}
 user_states = {}
@@ -34,12 +97,6 @@ def handle_rate_limit(user_id):
         return False
     user_last_interaction[user_id] = time.time()
     return True
-
-# List of admin user IDs
-ADMIN_IDS = [7507149806]
-
-# Telegram group ID for deposit notifications
-DEPOSIT_GROUP_ID = -1002721271109  # Replace with your group ID
 
 # Item prices (key: item_id, value: price in $)
 ITEM_PRICES = {
@@ -1027,18 +1084,22 @@ def get_amount(message):
         if amount <= 0:
             raise ValueError("Amount must be greater than 0.")
 
-        qr_data = khqr.create_qr(
-            bank_account='sihourhuy_phearum@wing',
-            merchant_name='SOKLAT SAN',
-            merchant_city='Phnom Penh',
-            amount=amount,
-            currency='USD',
-            store_label='MShop',
-            phone_number='855 097 slashing 8845445',
-            bill_number='TRX019283775',
-            terminal_label='Cashier-01',
-            static=False
-        )
+        qr_kwargs = {
+            "bank_account": KHQR_BANK_ACCOUNT,
+            "merchant_name": KHQR_MERCHANT_NAME,
+            "merchant_city": KHQR_MERCHANT_CITY,
+            "amount": amount,
+            "currency": KHQR_CURRENCY,
+            "store_label": KHQR_STORE_LABEL,
+            "bill_number": KHQR_BILL_NUMBER,
+            "terminal_label": KHQR_TERMINAL_LABEL,
+            "static": KHQR_STATIC,
+        }
+
+        if KHQR_PHONE_NUMBER:
+            qr_kwargs["phone_number"] = KHQR_PHONE_NUMBER
+
+        qr_data = khqr.create_qr(**qr_kwargs)
 
         md5_item = khqr.generate_md5(qr_data)
         qr_image = qrcode.make(qr_data)
@@ -1142,10 +1203,12 @@ def amount_handler(message):
         bot.send_photo(message.chat.id, photo, caption=f"⏳ ផុតកំណត់ក្នុងរយៈពេល 3 នាទី!\n\n📩 ផ្ញើវិក័យប័ត្រមកកាន់ខ្ញុំ")
 
     if user_id in user_states:
-        user_states[user_id]["photo_id"] = message.photo[-1].file_id if message.photo else None
+        photo_attr = getattr(message, "photo", None)
+        user_states[user_id]["photo_id"] = photo_attr[-1].file_id if photo_attr else None
         bot.send_message(message.chat.id, "✅ រូបភាពត្រូវបានទទួល។ សូមចុចប៊ូតុង '✔️ យល់ព្រម' ដើម្បីបញ្ជូនទិន្នន័យទៅ admin។")
     else:
         bot.send_message(message.chat.id, "❌ មិនមានទិន្នន័យដាក់ប្រាក់។ សូមព្យាយាមម្តងទៀត។")
+
 
 @bot.message_handler(func=lambda message: message.text == "✔️ យល់ព្រម")
 def confirm_handler(message):
@@ -1270,24 +1333,23 @@ def buy_item_handler(message):
 
         bot.send_message(message.chat.id, f"New Order Successfully ❇️\nPlayer ID: {server_id}\nServer ID: {zone_id}\nNickname: {nickname}\nProduct: {item_id}\nStatus: Success ✅")
 
-        group_ff_id = -1002840078804
-        group_mlbb_id = -1002840078804
-        group_operations_id = -1002721271109
-
         purchase_details = f"{server_id} {zone_id} {item_id}"
         if zone_id == 0:
-            send_group_message(group_ff_id, purchase_details)
+            send_group_message(GROUP_FF_ID, purchase_details)
         else:
-            send_group_message(group_mlbb_id, purchase_details)
+            send_group_message(GROUP_MLBB_ID, purchase_details)
 
         buyer_info = f"New Order Successfully ❇️\nGame: {'Free Fire' if zone_id == 0 else 'Mobile Legends'}\nPlayer ID: {server_id}\nServer ID: {zone_id}\nNickname: {nickname}\nProduct: {item_id}\nStatus: Success ✅"
-        send_group_message(group_operations_id, buyer_info)
+        send_group_message(GROUP_OPERATIONS_ID, buyer_info)
 
     except Exception as e:
         bot.send_message(message.chat.id, f"An error occurred: {e}")
         logging.error(f"Error in buy_item_handler: {e}")
 
 def send_group_message(group_id, message):
+    if group_id is None:
+        logging.warning("Group ID not configured; skipping message broadcast.")
+        return
     try:
         bot.send_message(group_id, message)
     except Exception as e:
