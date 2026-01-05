@@ -23,38 +23,43 @@ A Telegram automation bot that manages prepaid game credits for Mobile Legends a
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install pillow pytelegrambotapi requests qrcode bakong-khqr
+pip install pillow pytelegrambotapi requests qrcode bakong-khqr python-dotenv
 ```
 
-> Create a `requirements.txt` if you intend to deploy the bot; pin versions that work for your environment.
+> Create a `requirements.txt` if you intend to deploy the bot; pin versions that work for your environment. `python-dotenv` is optional in production if you load secrets through another mechanism.
 
 ## Configuration
 
-Replace inline secrets in `bot.py` with environment variables before running in production. The code currently references hard-coded values for clarity (@bot.py#21-43).
+The bot now boots entirely from environment variables, with optional `.env` loading when `python-dotenv` is available (@bot.py#1-90). All secrets **must** be provided before starting the process.
 
-1. Create a `.env` file (or use your preferred secret manager):
+1. Create a `.env` file (or supply the same keys via your host's secret manager):
 
    ```env
-   BOT_TOKEN="..."
-   BAKONG_API_TOKEN="..."
-   ADMIN_IDS="7507149806,1234567890"
-   DEPOSIT_GROUP_ID="-1002721271109"
-   GROUP_OPERATIONS_ID="-1002721271109"
-   GROUP_FF_ID="-1002840078804"
-   GROUP_MLBB_ID="-1002840078804"
+   BOT_TOKEN="your-telegram-bot-token"
+   BAKONG_API_TOKEN="your-bakong-api-token"
+
+   ADMIN_IDS="7507149806,1234567890"          # Comma-separated Telegram user IDs
+   DEPOSIT_GROUP_ID="-1002721271109"          # Required
+   GROUP_OPERATIONS_ID="-1002840078804"       # Optional
+   GROUP_FF_ID="-1002840078804"               # Optional
+   GROUP_MLBB_ID="-1002840078804"             # Optional
+
+   KHQR_BANK_ACCOUNT="..."
+   KHQR_MERCHANT_NAME="..."
+   KHQR_MERCHANT_CITY="..."
+   KHQR_CURRENCY="USD"                        # Defaults shown
+   KHQR_STORE_LABEL="MShop"
+   KHQR_PHONE_NUMBER=""                      # Leave blank if unused
+   KHQR_BILL_NUMBER="TRX019283775"
+   KHQR_TERMINAL_LABEL="Cashier-01"
+   KHQR_STATIC="false"                        # Accepts "true" or "false"
    ```
 
-2. Update `bot.py` to load the variables, e.g.:
+   Integer values (IDs, static flag) are parsed automatically; malformed numbers will raise clear startup errors (@bot.py#23-81).
 
-   ```python
-   from dotenv import load_dotenv
-   load_dotenv()
-   bot_token = os.getenv("BOT_TOKEN")
-   ```
+2. Generate a Bakong KHQR API token and ensure the merchant metadata passed to `khqr.create_qr` matches your account (@bot.py#87-118, @bot.py#1079-1127).
 
-3. Generate a Bakong KHQR API token and ensure the merchant information you pass to `khqr.create_qr` matches your account (@bot.py#25-41, @bot.py#1030-1108).
-
-4. Upload branding assets such as `logo.jpg` and `qr.jpg` to the project root; the bot attempts to send these when greeting users or confirming manual deposits (@bot.py#665-694, @bot.py#1141-1147).
+3. Upload branding assets such as `logo.jpg` and `qr.jpg` to the project root; the bot attempts to send these when greeting users or confirming manual deposits (@bot.py#665-693, @bot.py#1194-1208).
 
 ## Running the Bot
 
